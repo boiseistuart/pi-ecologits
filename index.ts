@@ -93,6 +93,9 @@ function span(r: Range, units: [number, string][]): string {
 export const CEILING = { energyWh: 50, gwpG: 20, waterMl: 200 };
 const CEILING_MARK = "‼";
 
+/** Everyday equivalents: Wh per smartphone charge, gCO₂e per petrol-car mile (~150 g/km), mL per glass of water. */
+export const EQUIV = { whPerCharge: 13, gPerMile: 240, mlPerGlass: 200 };
+
 /** Progress toward the nearest ceiling: max of the three midpoint ratios, clamped to [0, 1]. */
 export function ceilingProgress(t: Impacts): number {
 	const p = Math.max(
@@ -103,11 +106,21 @@ export function ceilingProgress(t: Impacts): number {
 	return Math.min(1, Math.max(0, p));
 }
 
+type Rgb = { kind: "rgb"; r: number; g: number; b: number };
+
+const gaugeHue = (p: number) => 120 * (1 - Math.min(1, Math.max(0, p)));
+
 /** Hue 120° (green) at p=0 to 0° (red) at p=1; darker on light themes for legibility. */
-export function gaugeColor(p: number, appearance: "dark" | "light" = "dark"): { kind: "rgb"; r: number; g: number; b: number } {
-	const h = 120 * (1 - Math.min(1, Math.max(0, p)));
-	const s = 0.85;
-	const v = appearance === "light" ? 0.7 : 0.95;
+export function gaugeColor(p: number, appearance: "dark" | "light" = "dark"): Rgb {
+	return hsv(gaugeHue(p), 0.85, appearance === "light" ? 0.7 : 0.95);
+}
+
+/** Same hue as gaugeColor, less saturated and closer to the background so it stands out less. */
+export function softGaugeColor(p: number, appearance: "dark" | "light" = "dark"): Rgb {
+	return hsv(gaugeHue(p), 0.45, appearance === "light" ? 0.8 : 0.65);
+}
+
+function hsv(h: number, s: number, v: number): Rgb {
 	const f = (n: number) => {
 		const k = (n + h / 60) % 6;
 		return Math.round(255 * (v - v * s * Math.max(0, Math.min(k, 4 - k, 1))));
@@ -115,14 +128,33 @@ export function gaugeColor(p: number, appearance: "dark" | "light" = "dark"): { 
 	return { kind: "rgb", r: f(5), g: f(3), b: f(1) };
 }
 
-export function formatFooter(total: Impacts, unknownCurrent?: string, anyKnown = true): string {
-	const parts: string[] = [];
+export type FooterSegment = { text: string; tone: "main" | "soft" };
+
+/** Footer split into gauge-coloured ("main") and softer ("soft") pieces; joined, they form formatFooter(). */
+export function footerSegments(total: Impacts, unknownCurrent?: string, anyKnown = true): FooterSegment[] {
+	const segs: FooterSegment[] = [];
+	const main = (text: string) => {
+		const last = segs.at(-1);
+		if (last?.tone === "main") last.text += text;
+		else segs.push({ text, tone: "main" });
+	};
+	const soft = (emoji: string, n: number, unit: string) => segs.push({ text: ` ≈ ${emoji} ${num(n)} ${unit}`, tone: "soft" });
+	main("⚡ ");
 	if (anyKnown) {
-		parts.push(approx(total.energy, ENERGY_UNITS), approx(total.gwp, GWP_UNITS), approx(total.wcf, WATER_UNITS));
+		main(approx(total.energy, ENERGY_UNITS));
+		soft("📱", (mid(total.energy) * 1000) / EQUIV.whPerCharge, "charges");
+		main(` · ${approx(total.gwp, GWP_UNITS)}`);
+		soft("🚗", (mid(total.gwp) * 1000) / EQUIV.gPerMile, "miles");
+		main(` · ${approx(total.wcf, WATER_UNITS)}`);
+		soft("🥛", (mid(total.wcf) * 1000) / EQUIV.mlPerGlass, "glasses");
 	}
-	if (unknownCurrent) parts.push(`n/a (${unknownCurrent})`);
-	const mark = anyKnown && ceilingProgress(total) >= 1 ? ` ${CEILING_MARK}` : "";
-	return `⚡ ${parts.join(" · ")}${mark}`;
+	if (unknownCurrent) main(`${anyKnown ? " · " : ""}n/a (${unknownCurrent})`);
+	if (anyKnown && ceilingProgress(total) >= 1) segs.push({ text: ` ${CEILING_MARK}`, tone: "main" });
+	return segs;
+}
+
+export function formatFooter(total: Impacts, unknownCurrent?: string, anyKnown = true): string {
+	return footerSegments(total, unknownCurrent, anyKnown).map((s) => s.text).join("");
 }
 
 export function formatReport(entries: ImpactEntry[]): string {
@@ -173,12 +205,15 @@ export default function (pi: ExtensionAPI) {
 		if (entries.length === 0) return ctx.ui.setStatus(STATUS_KEY, undefined);
 		const anyKnown = entries.some((e) => e.ok);
 		const total = sumImpacts(entries);
-		const text = formatFooter(total, unknownCurrent, anyKnown);
 		const theme = ctx.ui.theme;
-		const colored =
-			anyKnown && typeof theme?.style === "function"
-				? theme.style(text, { fg: gaugeColor(ceilingProgress(total), theme.appearance) })
-				: text;
+		if (!anyKnown || typeof theme?.style !== "function") {
+			return ctx.ui.setStatus(STATUS_KEY, formatFooter(total, unknownCurrent, anyKnown));
+		}
+		const p = ceilingProgress(total);
+		const fg = { main: gaugeColor(p, theme.appearance), soft: softGaugeColor(p, theme.appearance) };
+		const colored = footerSegments(total, unknownCurrent, anyKnown)
+			.map((s) => theme.style(s.text, { fg: fg[s.tone] }))
+			.join("");
 		ctx.ui.setStatus(STATUS_KEY, colored);
 	};
 
