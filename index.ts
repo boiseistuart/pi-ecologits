@@ -1,8 +1,10 @@
 /**
  * ecologits: estimates the environmental impact of each assistant response with a
  * TypeScript port of EcoLogits, shows session totals in the footer, and details
- * them via /impact.
+ * them via /impact. The footer is coloured green→red by progress toward per-session
+ * ceilings and ends with ‼ once a ceiling is reached.
  * Spec: ~/.pi/agent/specs/2026-11-13-ecologits-design.md
+ * Spec: ~/.pi/agent/specs/2026-11-16-ecologits-footer-ceiling-design.md
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { add, type Impacts, type Range } from "./llm.ts";
@@ -87,13 +89,40 @@ function span(r: Range, units: [number, string][]): string {
 	return `${num(r.min * f)}–${num(r.max * f)} ${u}`;
 }
 
+/** Per-session ceilings, in footer display units. */
+export const CEILING = { energyWh: 50, gwpG: 20, waterMl: 200 };
+const CEILING_MARK = "‼";
+
+/** Progress toward the nearest ceiling: max of the three midpoint ratios, clamped to [0, 1]. */
+export function ceilingProgress(t: Impacts): number {
+	const p = Math.max(
+		(mid(t.energy) * 1000) / CEILING.energyWh,
+		(mid(t.gwp) * 1000) / CEILING.gwpG,
+		(mid(t.wcf) * 1000) / CEILING.waterMl,
+	);
+	return Math.min(1, Math.max(0, p));
+}
+
+/** Hue 120° (green) at p=0 to 0° (red) at p=1; darker on light themes for legibility. */
+export function gaugeColor(p: number, appearance: "dark" | "light" = "dark"): { kind: "rgb"; r: number; g: number; b: number } {
+	const h = 120 * (1 - Math.min(1, Math.max(0, p)));
+	const s = 0.85;
+	const v = appearance === "light" ? 0.7 : 0.95;
+	const f = (n: number) => {
+		const k = (n + h / 60) % 6;
+		return Math.round(255 * (v - v * s * Math.max(0, Math.min(k, 4 - k, 1))));
+	};
+	return { kind: "rgb", r: f(5), g: f(3), b: f(1) };
+}
+
 export function formatFooter(total: Impacts, unknownCurrent?: string, anyKnown = true): string {
 	const parts: string[] = [];
 	if (anyKnown) {
 		parts.push(approx(total.energy, ENERGY_UNITS), approx(total.gwp, GWP_UNITS), approx(total.wcf, WATER_UNITS));
 	}
 	if (unknownCurrent) parts.push(`n/a (${unknownCurrent})`);
-	return `⚡ ${parts.join(" · ")}`;
+	const mark = anyKnown && ceilingProgress(total) >= 1 ? ` ${CEILING_MARK}` : "";
+	return `⚡ ${parts.join(" · ")}${mark}`;
 }
 
 export function formatReport(entries: ImpactEntry[]): string {
@@ -143,7 +172,14 @@ export default function (pi: ExtensionAPI) {
 		if (!ctx.hasUI) return;
 		if (entries.length === 0) return ctx.ui.setStatus(STATUS_KEY, undefined);
 		const anyKnown = entries.some((e) => e.ok);
-		ctx.ui.setStatus(STATUS_KEY, formatFooter(sumImpacts(entries), unknownCurrent, anyKnown));
+		const total = sumImpacts(entries);
+		const text = formatFooter(total, unknownCurrent, anyKnown);
+		const theme = ctx.ui.theme;
+		const colored =
+			anyKnown && typeof theme?.style === "function"
+				? theme.style(text, { fg: gaugeColor(ceilingProgress(total), theme.appearance) })
+				: text;
+		ctx.ui.setStatus(STATUS_KEY, colored);
 	};
 
 	pi.on("session_start", async (_event, ctx) => {

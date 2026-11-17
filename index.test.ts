@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import register, { formatReport, ENTRY_TYPE, type ImpactEntry } from "./index.ts";
+import register, { formatReport, formatFooter, ceilingProgress, gaugeColor, ENTRY_TYPE, type ImpactEntry } from "./index.ts";
 import { estimate } from "./lookup.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
@@ -92,4 +92,61 @@ test("/impact command notifies the report", async () => {
 	const s = setup([entry("claude-opus-5-5", 500, 6)]);
 	await s.commands.impact.handler("", s.ctx);
 	assert.ok(s.notes[0].includes("Energy"));
+});
+
+// --- Ceiling gauge (spec: ~/.pi/agent/specs/2026-11-16-ecologits-footer-ceiling-design.md)
+
+const r = (v: number) => ({ min: v, max: v });
+function totals(energyKWh: number, gwpKg: number, waterL: number) {
+	const z = r(0);
+	return {
+		energy: r(energyKWh), gwp: r(gwpKg), adpe: z, pe: z, wcf: r(waterL),
+		usage: { energy: r(energyKWh), gwp: r(gwpKg), adpe: z, pe: z, wcf: r(waterL) },
+		embodied: { gwp: z, adpe: z, pe: z },
+	};
+}
+
+test("ceilingProgress uses the largest ratio, clamped to 1", () => {
+	assert.equal(ceilingProgress(totals(0, 0, 0)), 0);
+	assert.equal(ceilingProgress(totals(0.025, 0.001, 0.01)), 0.5);
+	assert.equal(ceilingProgress(totals(0.001, 0.04, 0.01)), 1);
+	assert.equal(ceilingProgress(totals(0.001, 0.001, 0.15)), 0.75);
+});
+
+test("gaugeColor runs green → yellow → red and clamps", () => {
+	const g = gaugeColor(0);
+	assert.equal(g.kind, "rgb");
+	assert.ok(g.g > g.r && g.b <= g.r);
+	const red = gaugeColor(1);
+	assert.ok(red.r > red.g && red.r > red.b);
+	const y = gaugeColor(0.5);
+	assert.ok(Math.abs(y.r - y.g) <= 1 && y.b < y.r);
+	assert.deepEqual(gaugeColor(2), gaugeColor(1));
+	assert.deepEqual(gaugeColor(-1), gaugeColor(0));
+	const light = gaugeColor(0.5, "light");
+	assert.ok(light.r < y.r, "light theme is darker");
+});
+
+test("formatFooter appends ‼ last once a ceiling is reached", () => {
+	assert.match(formatFooter(totals(0.05, 0.001, 0.01)), / ‼$/);
+	assert.doesNotMatch(formatFooter(totals(0.01, 0.001, 0.01)), /‼/);
+	assert.match(formatFooter(totals(0.1, 0.1, 1), "x"), /n\/a \(x\) ‼$/);
+	assert.doesNotMatch(formatFooter(totals(0.1, 0.1, 1), "x", false), /‼/);
+});
+
+test("footer is coloured through the theme when one exists", async () => {
+	const s = setup();
+	const styled: any[] = [];
+	(s.ctx.ui as any).theme = { appearance: "dark", style: (t: string, o: any) => (styled.push(o), `<${o.fg.kind}>${t}`) };
+	await s.handlers.message_end(assistant("claude-opus-5-5", 500), s.ctx);
+	assert.match(s.statuses.at(-1)!, /^<rgb>⚡ /);
+	assert.ok(styled[0].fg.g > styled[0].fg.r, "small session is green");
+});
+
+test("only unknown models: no colour applied", async () => {
+	const s = setup();
+	let called = false;
+	(s.ctx.ui as any).theme = { appearance: "dark", style: (t: string) => ((called = true), t) };
+	await s.handlers.message_end(assistant("no-such-model", 50), s.ctx);
+	assert.equal(called, false);
 });
