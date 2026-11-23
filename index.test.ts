@@ -2,7 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import register, {
 	formatReport, formatFooter, footerSegments, ceilingProgress, gaugeColor, softGaugeColor, ENTRY_TYPE, type ImpactEntry,
+	compact, formatHistory, sessionsRoot,
 } from "./index.ts";
+import { PERIODS, type HistoryTotals } from "./history.ts";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { estimate } from "./lookup.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
@@ -199,4 +204,66 @@ test("only unknown models: no colour applied", async () => {
 	(s.ctx.ui as any).theme = { appearance: "dark", style: (t: string) => ((called = true), t) };
 	await s.handlers.message_end(assistant("no-such-model", 50), s.ctx);
 	assert.equal(called, false);
+});
+
+// --- Cross-session totals (spec: docs/specs/2026-11-23-ecologits-history-totals-design.md)
+
+function history(entries: ImpactEntry[], input = 0, cacheRead = 0, cacheWrite = 0): HistoryTotals {
+	return Object.fromEntries(PERIODS.map((p) => [p, { entries, input, cacheRead, cacheWrite }])) as HistoryTotals;
+}
+const okEntry: ImpactEntry = { provider: "anthropic", model: "m", output: 300, latency: 1, ok: true, impacts: totals(0.002, 0, 0) };
+
+test("compact formats token counts", () => {
+	assert.deepEqual([0, 950, 1234, 12345, 1_234_567, 2_500_000_000].map(compact), ["0", "950", "1.2k", "12k", "1.2M", "2.5B"]);
+});
+
+test("formatHistory lists every period with impacts and tokens", () => {
+	const s = formatHistory(history([okEntry], 5, 1_200_000, 7288));
+	const lines = s.split("\n");
+	assert.equal(lines[0], "All sessions");
+	assert.match(lines[1], /Energy +GWP +Water +Responses +Output +Input +Cache read +Cache write/);
+	assert.deepEqual(lines.slice(2).map((l) => l.split(/ {2,}/)[0]), ["Today", "This week", "This month", "This year", "All time"]);
+	assert.match(lines[2], /~2 Wh .* 1 +300 +5 +1\.2M +7\.3k/);
+	assert.doesNotMatch(s, /Note:/);
+});
+
+test("formatHistory shows unknown-model-only periods as zero impact", () => {
+	const unknown: ImpactEntry = { provider: "anthropic", model: "x", output: 10, latency: 1, ok: false };
+	assert.match(formatHistory(history([unknown])).split("\n")[2], /~0 Wh .* 1 +10 /);
+});
+
+test("formatReport puts the history before a single caveat", () => {
+	const r = formatReport([], history([okEntry]));
+	assert.ok(r.indexOf("All sessions") < r.indexOf("Note:"));
+	assert.equal(r.match(/Note:/g)!.length, 1);
+	assert.match(formatReport([], "EACCES"), /All sessions: unavailable \(EACCES\)\nNote:/);
+});
+
+test("/impact includes all-sessions totals from the session root", async () => {
+	const tmpRoot = await mkdtemp(join(tmpdir(), "ecologits-root-"));
+	await mkdir(join(tmpRoot, "--other--"));
+	const line = JSON.stringify({ type: "custom", customType: ENTRY_TYPE, id: "a1", parentId: null, timestamp: new Date().toISOString(), data: okEntry });
+	await writeFile(join(tmpRoot, "--other--", "s.jsonl"), line + "\n");
+	const s = setup();
+	Object.assign(s.ctx.sessionManager, { getSessionDir: () => join(tmpRoot, "--proj--"), usesDefaultSessionDir: () => true });
+	await s.commands.impact.handler("", s.ctx);
+	assert.match(s.notes[0], /All sessions/);
+	assert.match(s.notes[0], /Today .* 1 +300 /);
+});
+
+test("/impact still reports the session when the scan fails", async () => {
+	const tmpRoot = await mkdtemp(join(tmpdir(), "ecologits-bad-"));
+	const file = join(tmpRoot, "not-a-dir");
+	await writeFile(file, "");
+	const s = setup([entry("claude-opus-5-5", 500, 6)]);
+	Object.assign(s.ctx.sessionManager, { getSessionDir: () => file, usesDefaultSessionDir: () => false });
+	await s.commands.impact.handler("", s.ctx);
+	assert.match(s.notes[0], /Energy/);
+	assert.match(s.notes[0], /All sessions: unavailable \(.+\)\nNote:/);
+});
+
+test("sessionsRoot honours custom session dirs", () => {
+	assert.equal(sessionsRoot({ sessionManager: { getSessionDir: () => "/x/--p--", usesDefaultSessionDir: () => true } }), "/x");
+	assert.equal(sessionsRoot({ sessionManager: { getSessionDir: () => "/custom", usesDefaultSessionDir: () => false } }), "/custom");
+	assert.equal(sessionsRoot({}), join(homedir(), ".pi/agent/sessions"));
 });

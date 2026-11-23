@@ -5,8 +5,12 @@
  * ceilings and ends with ‼ once a ceiling is reached.
  * Spec: ~/.pi/agent/specs/2026-11-13-ecologits-design.md
  * Spec: ~/.pi/agent/specs/2026-11-16-ecologits-footer-ceiling-design.md
+ * Spec: docs/specs/2026-11-23-ecologits-history-totals-design.md (cross-session totals in /impact)
  */
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { scanHistory, PERIODS, type HistoryTotals, type Period } from "./history.ts";
 import { add, type Impacts, type Range } from "./llm.ts";
 import { estimate } from "./lookup.ts";
 
@@ -157,7 +161,43 @@ export function formatFooter(total: Impacts, unknownCurrent?: string, anyKnown =
 	return footerSegments(total, unknownCurrent, anyKnown).map((s) => s.text).join("");
 }
 
-export function formatReport(entries: ImpactEntry[]): string {
+/** Token count: integer below 1000, otherwise two significant digits with k/M/B. */
+export function compact(n: number): string {
+	if (Math.abs(n) < 1000) return String(Math.round(n));
+	const units: [number, string][] = [[1e9, "B"], [1e6, "M"], [1e3, "k"]];
+	const [f, u] = units.find(([f]) => Math.abs(n) >= f)!;
+	return `${Number((n / f).toPrecision(2))}${u}`;
+}
+
+const PERIOD_LABELS: Record<Period, string> = {
+	today: "Today", week: "This week", month: "This month", year: "This year", all: "All time",
+};
+
+export function formatHistory(h: HistoryTotals): string {
+	const rows = [["", "Energy", "GWP", "Water", "Responses", "Output", "Input", "Cache read", "Cache write"]];
+	for (const p of PERIODS) {
+		const { entries, input, cacheRead, cacheWrite } = h[p];
+		const t = sumImpacts(entries);
+		const output = entries.reduce((s, e) => s + (e.output ?? 0), 0);
+		rows.push([
+			PERIOD_LABELS[p], approx(t.energy, ENERGY_UNITS), approx(t.gwp, GWP_UNITS), approx(t.wcf, WATER_UNITS),
+			String(entries.length), compact(output), compact(input), compact(cacheRead), compact(cacheWrite),
+		]);
+	}
+	const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
+	const lines = rows.map((r) => r.map((cell, c) => cell.padEnd(widths[c])).join("  ").trimEnd());
+	return ["All sessions", ...lines].join("\n");
+}
+
+/** Root of all session files: parent of the per-cwd default dir, or a custom session dir as-is. */
+export function sessionsRoot(ctx: any): string {
+	const sm = ctx?.sessionManager;
+	const dir = sm?.getSessionDir?.();
+	if (typeof dir === "string" && dir) return sm.usesDefaultSessionDir?.() ? dirname(dir) : dir;
+	return join(homedir(), ".pi/agent/sessions");
+}
+
+export function formatReport(entries: ImpactEntry[], history?: HistoryTotals | string): string {
 	const t = sumImpacts(entries);
 	const sci = (r: Range, unit: string) => `${r.min.toExponential(2)}–${r.max.toExponential(2)} ${unit}`;
 	const lines = [
@@ -184,6 +224,8 @@ export function formatReport(entries: ImpactEntry[]): string {
 	}
 	const warnings = [...new Set(entries.flatMap((e) => e.warnings ?? []))];
 	if (warnings.length) lines.push(`Warnings: ${warnings.join(", ")} (see https://ecologits.ai/tutorial/warnings_and_errors/)`);
+	if (typeof history === "string") lines.push("", `All sessions: unavailable (${history})`);
+	else if (history) lines.push("", formatHistory(history));
 	lines.push(CAVEAT);
 	return lines.join("\n");
 }
@@ -243,7 +285,13 @@ export default function (pi: ExtensionAPI) {
 		description: "Show estimated environmental impact of this session (EcoLogits)",
 		handler: async (_args, ctx) => {
 			const fromSession = readEntries(ctx);
-			const report = formatReport(fromSession.length >= entries.length ? fromSession : entries);
+			let history: HistoryTotals | string;
+			try {
+				history = await scanHistory(sessionsRoot(ctx));
+			} catch (err: any) {
+				history = String(err?.message ?? err);
+			}
+			const report = formatReport(fromSession.length >= entries.length ? fromSession : entries, history);
 			if (ctx.hasUI) ctx.ui.notify(report, "info");
 			else console.log(report);
 		},
