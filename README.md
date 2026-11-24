@@ -106,4 +106,4 @@ node scripts/sync-upstream.ts                      # clones upstream, syncs to o
 node scripts/sync-upstream.ts --upstream-dir /tmp/ecologits --ref <sha>
 ```
 
-It prints `status=up-to-date|synced|needs-attention` and writes `sync-report.md`. The pinned commit lives in `data/UPSTREAM`; the script also updates the pin in `llm.ts` and this README.
+It prints `status=up-to-date|synced|needs-attention` and writes `sync-report.md`. The pinned commit lives in `data/UPSTREAM`: the last upstream commit whose data was taken. Upstream commits that don't change the data leave the pin (and the repo) untouched, so they never produce a PR; later runs still check upstream code changes since the pin. The script also updates the pin in `llm.ts` and this README.

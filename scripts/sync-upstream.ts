@@ -103,8 +103,19 @@ const mixesRaw = readFileSync(join(dir, "ecologits/data/electricity_mixes.json")
 const upstreamModels = JSON.parse(modelsRaw);
 const models = mergeModels(readJson(root("data/models.json")), upstreamModels);
 const mixes = mergeMixes(readJson(root("data/electricity_mixes.json")), JSON.parse(mixesRaw));
-writeFileSync(root("data/models.json"), serializeData(models.data, modelsRaw));
-writeFileSync(root("data/electricity_mixes.json"), serializeData(mixes.data, mixesRaw));
+const nextModels = serializeData(models.data, modelsRaw);
+const nextMixes = serializeData(mixes.data, mixesRaw);
+
+// No data change and nothing to flag: leave the pin where it is, so commits
+// without data changes don't produce pin-only PRs. Later runs still diff
+// upstream code from this pin.
+const dataUnchanged =
+	nextModels === readFileSync(root("data/models.json"), "utf8") &&
+	nextMixes === readFileSync(root("data/electricity_mixes.json"), "utf8");
+if (dataUnchanged && !report.reasons.length) finish({ ...report, status: "up-to-date" });
+
+writeFileSync(root("data/models.json"), nextModels);
+writeFileSync(root("data/electricity_mixes.json"), nextMixes);
 report.models = { added: models.added, changed: models.changed, retained: models.retained };
 report.mixes = { added: mixes.added, changed: mixes.changed, retained: mixes.retained };
 
