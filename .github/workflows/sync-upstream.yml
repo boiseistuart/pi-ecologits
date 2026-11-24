@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 26
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.4.0 # no major tags since v8 (immutable releases)
         with:
           enable-cache: false # no lock file to key on; the job is short
 
