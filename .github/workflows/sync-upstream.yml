@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The sync step runs upstream Python code; keep the write token out of .git/config.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
