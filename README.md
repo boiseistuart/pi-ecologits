@@ -99,6 +99,16 @@ A weekly GitHub Action (`.github/workflows/sync-upstream.yml`, also runnable by 
 - `reference/reference.json` is regenerated with the Python library and the tests must pass.
 - Success opens or updates one PR (branch `sync/ecologits`). Anything else (formula or provider-config change upstream, a `reference/gen.py` case model removed, failing tests) opens or updates one issue labelled `upstream-sync`, with the details.
 
+### Agent fallback (optional)
+
+If the repo has an `ANTHROPIC_API_KEY` Actions secret, a needs-attention sync first hands the leftovers to [pi](https://pi.dev) running headless (`pi --print`, prompt in `.github/agent/sync-prompt.md`): port formula/provider-config changes into `llm.ts`, or replace a vanished `reference/gen.py` case model. The workflow then:
+
+- fails the attempt if the agent edited anything besides `llm.ts`, `reference/gen.py` and `reference/reference.json`;
+- re-runs the sync with `--accept-code-changes` (the Python reference and tests still gate);
+- opens the PR (titled *agent-ported, review carefully*) or the issue as usual, with the agent's summary appended, and uploads the pi session as the `pi-session` artifact.
+
+Without the secret, behaviour is unchanged. Set an Actions variable `PI_MODEL` to change the model (default `anthropic/claude-sonnet-5-5`). Expect a handful of runs a year at roughly $0.30–2 each.
+
 Run the same sync locally (needs `git` and `uv`):
 
 ```bash
