@@ -1,0 +1,16 @@
+{
+  "name": "pi-ecologits",
+  "version": "0.1.0",
+  "description": "Estimate the energy, carbon and water footprint of pi sessions with EcoLogits",
+  "type": "module",
+  "keywords": ["pi-package", "ecologits", "carbon", "energy", "sustainability"],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

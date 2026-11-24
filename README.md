@@ -66,14 +66,22 @@ For other providers (e.g. OpenRouter), a model id of the form `vendor/name` is m
 
 ## Install
 
-Place this directory at `~/.pi/agent/extensions/ecologits/` and run `/reload` in pi (or restart).
+```bash
+pi install git:github.com/<you>/pi-ecologits
+```
+
+Pin a version with `@<tag>`, e.g. `git:github.com/<you>/pi-ecologits@v0.1.0`. Then `/reload` in pi (or restart).
+
+Alternatively, clone this repo to `~/.pi/agent/extensions/ecologits/`. Pi loads extensions from there automatically. Use one method, not both, or the extension loads twice.
+
+`package.json` limits loading to `index.ts`; the other modules are imported by it, and test files are never loaded.
 
 ## Development
 
 Requires Node 26+ (native TypeScript type stripping).
 
 ```bash
-node --test
+node --test   # or: npm test
 ```
 
 To regenerate reference values from the Python library (with an EcoLogits checkout at `/tmp/ecologits`):
