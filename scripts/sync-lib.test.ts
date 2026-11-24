@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { extractProviderConfig, formatReport, missingCases, parseCases, rewritePin } from "./sync-lib.ts";
+import { extractProviderConfig, formatReport, missingCases, parseCases, rewritePin, serializeData } from "./sync-lib.ts";
 
 const genPy = readFileSync(new URL("../reference/gen.py", import.meta.url), "utf8");
 
@@ -67,4 +67,10 @@ test("formatReport shows SHAs, lists, reasons and optional blocks", () => {
 
 	const bare = formatReport({ status: "up-to-date", from: "4edff3e000", to: "4edff3e000", reasons: [] });
 	assert.doesNotMatch(bare, /```/);
+});
+
+test("serializeData keeps upstream bytes when data equals upstream", () => {
+	const raw = '{\n    "x": [\n        1.349e-08,\n        0.0\n    ]\n}';
+	assert.equal(serializeData(JSON.parse(raw), raw), raw);
+	assert.equal(serializeData({ x: [1.349e-8, 1] }, raw), '{\n    "x": [\n        1.349e-8,\n        1\n    ]\n}');
 });

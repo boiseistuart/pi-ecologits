@@ -1,6 +1,7 @@
 /**
  * Pure helpers for scripts/sync-upstream.ts.
  */
+import { isDeepStrictEqual } from "node:util";
 import type { MergeLists } from "./merge.ts";
 
 export type SyncStatus = "up-to-date" | "synced" | "needs-attention";
@@ -83,4 +84,13 @@ export function formatReport(r: SyncReport): string {
 	if (r.codeDiff) out.push("### Upstream code changes", "", "```diff", r.codeDiff, "```", "");
 	if (r.testOutput) out.push("### Test output", "", "```", r.testOutput, "```", "");
 	return out.join("\n");
+}
+
+/**
+ * JSON text for a data file: upstream's exact bytes when the data is unchanged
+ * from upstream (Python and JS format numbers differently, e.g. 1.349e-08),
+ * otherwise 4-space JSON without a trailing newline, like upstream.
+ */
+export function serializeData(data: unknown, upstreamRaw: string): string {
+	return isDeepStrictEqual(data, JSON.parse(upstreamRaw)) ? upstreamRaw : JSON.stringify(data, null, 4);
 }

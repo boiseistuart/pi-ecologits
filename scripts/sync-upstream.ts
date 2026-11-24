@@ -14,7 +14,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { mergeMixes, mergeModels } from "./merge.ts";
-import { extractProviderConfig, formatReport, missingCases, parseCases, rewritePin, type SyncReport } from "./sync-lib.ts";
+import {
+	extractProviderConfig,
+	formatReport,
+	missingCases,
+	parseCases,
+	rewritePin,
+	serializeData,
+	type SyncReport,
+} from "./sync-lib.ts";
 
 const UPSTREAM_URL = "https://github.com/genai-impact/ecologits.git";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -42,7 +50,6 @@ function git(dir: string, ...argv: string[]): string {
 
 const tail = (s: string, n: number) => s.trimEnd().split("\n").slice(-n).join("\n");
 const readJson = (p: string) => JSON.parse(readFileSync(p, "utf8"));
-const writeJson = (p: string, data: unknown) => writeFileSync(p, JSON.stringify(data, null, 4));
 
 function finish(report: SyncReport): never {
 	writeFileSync(args.report!, formatReport(report));
@@ -91,14 +98,13 @@ if (run("git", ["-C", dir, "cat-file", "-e", `${pin}^{commit}`]).code !== 0) {
 
 // 4. Merge data
 git(dir, "checkout", "-q", "--detach", target);
-const upstreamModels = readJson(join(dir, "ecologits/data/models.json"));
+const modelsRaw = readFileSync(join(dir, "ecologits/data/models.json"), "utf8");
+const mixesRaw = readFileSync(join(dir, "ecologits/data/electricity_mixes.json"), "utf8");
+const upstreamModels = JSON.parse(modelsRaw);
 const models = mergeModels(readJson(root("data/models.json")), upstreamModels);
-const mixes = mergeMixes(
-	readJson(root("data/electricity_mixes.json")),
-	readJson(join(dir, "ecologits/data/electricity_mixes.json")),
-);
-writeJson(root("data/models.json"), models.data);
-writeJson(root("data/electricity_mixes.json"), mixes.data);
+const mixes = mergeMixes(readJson(root("data/electricity_mixes.json")), JSON.parse(mixesRaw));
+writeFileSync(root("data/models.json"), serializeData(models.data, modelsRaw));
+writeFileSync(root("data/electricity_mixes.json"), serializeData(mixes.data, mixesRaw));
 report.models = { added: models.added, changed: models.changed, retained: models.retained };
 report.mixes = { added: mixes.added, changed: mixes.changed, retained: mixes.retained };
 
