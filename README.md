@@ -60,7 +60,8 @@ For other providers (e.g. OpenRouter), a model id of the form `vendor/name` is m
 | `history.ts` | Cross-session scan, dedupe, period bucketing |
 | `lookup.ts` | pi → EcoLogits provider/model mapping, `estimate()` |
 | `llm.ts` | Port of EcoLogits' `compute_llm_impacts` |
-| `data/` | EcoLogits `models.json` and `electricity_mixes.json` snapshots |
+| `data/` | EcoLogits `models.json` and `electricity_mixes.json` snapshots; `UPSTREAM` holds the pinned upstream commit |
+| `scripts/` | Upstream sync script and its helpers |
 | `reference/` | `gen.py` and `reference.json`: outputs from the Python library used to verify the port |
 | `docs/specs/`, `docs/plans/` | Design docs and implementation plans |
 
@@ -90,4 +91,19 @@ To regenerate reference values from the Python library (with an EcoLogits checko
 uv run --with /tmp/ecologits python reference/gen.py
 ```
 
-To update model data, copy `models.json` and `electricity_mixes.json` from the EcoLogits repo into `data/` and re-run the tests.
+## Updating EcoLogits data
+
+A weekly GitHub Action (`.github/workflows/sync-upstream.yml`, also runnable by hand) syncs `data/` with upstream EcoLogits `main`:
+
+- Upstream data wins; models and zones that upstream **removed are kept**, so they don't turn `n/a` for people still using them.
+- `reference/reference.json` is regenerated with the Python library and the tests must pass.
+- Success opens or updates one PR (branch `sync/ecologits`). Anything else (formula or provider-config change upstream, a `reference/gen.py` case model removed, failing tests) opens or updates one issue labelled `upstream-sync`, with the details.
+
+Run the same sync locally (needs `git` and `uv`):
+
+```bash
+node scripts/sync-upstream.ts                      # clones upstream, syncs to origin/main
+node scripts/sync-upstream.ts --upstream-dir /tmp/ecologits --ref <sha>
+```
+
+It prints `status=up-to-date|synced|needs-attention` and writes `sync-report.md`. The pinned commit lives in `data/UPSTREAM`; the script also updates the pin in `llm.ts` and this README.
