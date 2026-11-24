@@ -1,6 +1,6 @@
 # ecologits — environmental impact for pi
 
-A pi extension that estimates the energy, carbon, and water footprint of each assistant response, using a TypeScript port of [EcoLogits](https://ecologits.ai) ([genai-impact/ecologits](https://github.com/genai-impact/ecologits) @ `3a8e85c`). No Python, no npm dependencies.
+A pi extension that estimates the energy, carbon, and water footprint of each assistant response, using a TypeScript port of [EcoLogits](https://ecologits.ai) ([genai-impact/ecologits](https://github.com/genai-impact/ecologits) @ `4edff3e`). No Python, no npm dependencies.
 
 ## What you see
 

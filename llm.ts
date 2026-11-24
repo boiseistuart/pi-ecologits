@@ -1,6 +1,6 @@
 /**
  * TypeScript port of EcoLogits' LLM impact formula.
- * Source: github.com/genai-impact/ecologits @ 3a8e85c
+ * Source: github.com/genai-impact/ecologits @ 4edff3e
  *   ecologits/impacts/llm.py (constants, DAG, compute_llm_impacts)
  *   ecologits/tracers/utils.py (PROVIDER_CONFIG_MAP)
  * Spec: ~/.pi/agent/specs/2026-11-13-ecologits-design.md

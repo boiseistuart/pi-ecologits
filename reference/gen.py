@@ -10,7 +10,7 @@ from ecologits.tracers.utils import llm_impacts
 CASES = [
     ("anthropic", "claude-opus-5-5", 500, 6.0),
     ("anthropic", "claude-haiku-4-5-20251001", 1, 0.3),
-    ("openai", "gpt-5-codex", 2000, 40.0),
+    ("openai", "gpt-5.3-codex", 2000, 40.0),
     ("openai", "gpt-5-2025-08-07", 800, 1.0),
     ("mistralai", "codestral-2508", 300, 5.0),
     ("huggingface_hub", "databricks/dolly-v1-6b", 1000, 1000.0),
