@@ -1,7 +1,10 @@
 /**
  * Sync data/ with upstream EcoLogits and verify against the Python library.
  *
- *   node scripts/sync-upstream.ts [--upstream-dir <path>] [--ref <sha>] [--report <path>]
+ *   node scripts/sync-upstream.ts [--upstream-dir <path>] [--ref <sha>] [--report <path>] [--accept-code-changes]
+ *
+ * --accept-code-changes: upstream formula/provider-config changes are reported
+ * but not flagged, for a run after they were ported into llm.ts (tests still gate).
  *
  * Prints `status=<up-to-date|synced|needs-attention>` (also written to
  * $GITHUB_OUTPUT when set) and writes a Markdown report. Exits non-zero only
@@ -33,6 +36,7 @@ const { values: args } = parseArgs({
 		"upstream-dir": { type: "string" },
 		ref: { type: "string", default: "origin/main" },
 		report: { type: "string", default: root("sync-report.md") },
+		"accept-code-changes": { type: "boolean", default: false },
 	},
 });
 
@@ -92,7 +96,7 @@ if (run("git", ["-C", dir, "cat-file", "-e", `${pin}^{commit}`]).code !== 0) {
 	}
 	if (parts.length) {
 		report.codeDiff = parts.join("\n\n");
-		report.reasons.push("Formula or provider config changed upstream — port into llm.ts");
+		if (!args["accept-code-changes"]) report.reasons.push("Formula or provider config changed upstream — port into llm.ts");
 	}
 }
 
@@ -112,7 +116,7 @@ const nextMixes = serializeData(mixes.data, mixesRaw);
 const dataUnchanged =
 	nextModels === readFileSync(root("data/models.json"), "utf8") &&
 	nextMixes === readFileSync(root("data/electricity_mixes.json"), "utf8");
-if (dataUnchanged && !report.reasons.length) finish({ ...report, status: "up-to-date" });
+if (dataUnchanged && !report.codeDiff && !report.reasons.length) finish({ ...report, status: "up-to-date" });
 
 writeFileSync(root("data/models.json"), nextModels);
 writeFileSync(root("data/electricity_mixes.json"), nextMixes);
