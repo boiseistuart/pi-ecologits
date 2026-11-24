@@ -12,9 +12,16 @@ permissions:
 
 concurrency: sync-upstream
 
+env:
+  UPSTREAM: ${{ github.workspace }}/../ecologits
+  REPORT: ${{ github.workspace }}/../sync-report.md
+  # Agent fallback runs only when this secret is set; otherwise needs-attention goes straight to an issue.
+  HAS_AGENT_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,27 +36,86 @@ jobs:
         with:
           enable-cache: false # no lock file to key on; the job is short
 
+      - name: Clone upstream
+        run: git clone -q https://github.com/genai-impact/ecologits.git "$UPSTREAM"
+
       - name: Sync with upstream
         id: sync
-        run: node scripts/sync-upstream.ts --report "$RUNNER_TEMP/sync-report.md"
+        run: node scripts/sync-upstream.ts --upstream-dir "$UPSTREAM" --report "$REPORT"
+
+      # --- Agent fallback (pi headless) -------------------------------------------------
+
+      - name: Agent fallback (pi)
+        id: agent
+        if: steps.sync.outputs.status == 'needs-attention' && env.HAS_AGENT_KEY == 'true'
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PI_MODEL: ${{ vars.PI_MODEL || 'anthropic/claude-sonnet-5-5' }}
+        run: |
+          # Snapshot the tree so the guardrail sees only the agent's edits.
+          git add -A && echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT" && git reset -q
+          npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.6.0
+          pi --print --model "$PI_MODEL" \
+             --session-dir "$RUNNER_TEMP/pi-sessions" -ne --no-mcp -ns -np \
+             @.github/agent/sync-prompt.md @"$REPORT" \
+             "Upstream checkout: $UPSTREAM (also in \$UPSTREAM). Fix what the sync script could not, then stop." \
+             > "$RUNNER_TEMP/agent-summary.md"
+
+      - name: Verify agent changes
+        id: verify
+        if: steps.agent.outcome == 'success' || steps.agent.outcome == 'failure'
+        run: |
+          git add -A
+          bad=$(git diff --cached --name-only "${{ steps.agent.outputs.tree }}" \
+                | grep -vxE 'llm\.ts|reference/gen\.py|reference/reference\.json' || true)
+          git reset -q
+          if [ -n "$bad" ]; then
+            echo "status=needs-attention" >> "$GITHUB_OUTPUT"
+            printf '\n### Agent edited files outside llm.ts and reference/gen.py\n\n%s\n' "$bad" >> "$REPORT"
+          else
+            # Re-run the sync from the committed data (otherwise the already-merged data
+            # reads as "unchanged"); ported code changes are accepted, the tests still gate.
+            git checkout -q HEAD -- data/ reference/reference.json
+            node scripts/sync-upstream.ts --upstream-dir "$UPSTREAM" --report "$REPORT" --accept-code-changes
+          fi
+          {
+            printf '\n## Agent (pi, %s)\n\n' "${{ steps.agent.outcome }}"
+            cat "$RUNNER_TEMP/agent-summary.md" 2>/dev/null || echo "_No summary._"
+          } >> "$REPORT"
+
+      - name: Upload agent session
+        if: always() && steps.agent.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pi-session
+          path: ${{ runner.temp }}/pi-sessions
+          if-no-files-found: ignore
+
+      # --- Outcome -------------------------------------------------------------------------
+
+      - name: Final status
+        id: final
+        run: echo "status=${{ steps.verify.outputs.status || steps.sync.outputs.status }}" >> "$GITHUB_OUTPUT"
 
       - name: Open or update PR
-        if: steps.sync.outputs.status == 'synced'
+        if: steps.final.outputs.status == 'synced'
         uses: peter-evans/create-pull-request@v8
         with:
           branch: sync/ecologits
           delete-branch: true
-          title: "chore: sync EcoLogits data from upstream"
+          title: "${{ steps.verify.outputs.status == 'synced' && 'chore: sync EcoLogits from upstream (agent-ported, review carefully)' || 'chore: sync EcoLogits data from upstream' }}"
           commit-message: "chore: sync EcoLogits data from upstream"
-          body-path: ${{ runner.temp }}/sync-report.md
+          body-path: ${{ env.REPORT }}
           add-paths: |
             data/
-            reference/reference.json
+            reference/
             llm.ts
             README.md
 
       - name: Close resolved issue
-        if: steps.sync.outputs.status == 'synced'
+        if: steps.final.outputs.status == 'synced'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -57,10 +123,9 @@ jobs:
           if [ -n "$n" ]; then gh issue close "$n" --comment "Resolved: sync succeeded, see the sync/ecologits PR."; fi
 
       - name: Open or update issue
-        if: steps.sync.outputs.status == 'needs-attention'
+        if: steps.final.outputs.status == 'needs-attention'
         env:
           GH_TOKEN: ${{ github.token }}
-          REPORT: ${{ runner.temp }}/sync-report.md
         run: |
           gh label create upstream-sync --force --color FBCA04 --description "EcoLogits upstream sync needs attention"
           n=$(gh issue list --label upstream-sync --state open --json number -q '.[0].number')
