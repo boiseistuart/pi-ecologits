@@ -67,12 +67,12 @@ For other providers (e.g. OpenRouter), a model id of the form `vendor/name` is m
 ## Install
 
 ```bash
-pi install git:github.com/<you>/pi-ecologits
+pi install git:github.com/boiseistuart/pi-ecologits
 ```
 
-Pin a version with `@<tag>`, e.g. `git:github.com/<you>/pi-ecologits@v0.1.0`. Then `/reload` in pi (or restart).
+Pin a version with `@<tag>`, e.g. `git:github.com/boiseistuart/pi-ecologits@v0.1.0`. Then `/reload` in pi (or restart).
 
-Alternatively, clone this repo to `~/.pi/agent/extensions/ecologits/`. Pi loads extensions from there automatically. Use one method, not both, or the extension loads twice.
+Alternatively, clone this repo to `~/.pi/agent/extensions/pi-ecologits/`. Pi loads extensions from there automatically. Use one method, not both, or the extension loads twice.
 
 `package.json` limits loading to `index.ts`; the other modules are imported by it, and test files are never loaded.
 
