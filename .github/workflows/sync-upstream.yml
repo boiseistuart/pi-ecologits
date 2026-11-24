@@ -1,0 +1,66 @@
+name: Sync EcoLogits upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency: sync-upstream
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Sync with upstream
+        id: sync
+        run: node scripts/sync-upstream.ts --report "$RUNNER_TEMP/sync-report.md"
+
+      - name: Open or update PR
+        if: steps.sync.outputs.status == 'synced'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: sync/ecologits
+          delete-branch: true
+          title: "chore: sync EcoLogits data from upstream"
+          commit-message: "chore: sync EcoLogits data from upstream"
+          body-path: ${{ runner.temp }}/sync-report.md
+          add-paths: |
+            data/
+            reference/reference.json
+            llm.ts
+            README.md
+
+      - name: Close resolved issue
+        if: steps.sync.outputs.status == 'synced'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh issue list --label upstream-sync --state open --json number -q '.[0].number')
+          if [ -n "$n" ]; then gh issue close "$n" --comment "Resolved: sync succeeded, see the sync/ecologits PR."; fi
+
+      - name: Open or update issue
+        if: steps.sync.outputs.status == 'needs-attention'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ runner.temp }}/sync-report.md
+        run: |
+          gh label create upstream-sync --force --color FBCA04 --description "EcoLogits upstream sync needs attention"
+          n=$(gh issue list --label upstream-sync --state open --json number -q '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue edit "$n" --body-file "$REPORT"
+          else
+            gh issue create --title "EcoLogits upstream sync needs attention" --label upstream-sync --body-file "$REPORT"
+          fi
